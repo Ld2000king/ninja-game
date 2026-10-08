@@ -117,15 +117,23 @@ export function promote(uid) {
   return true;
 }
 
+export const releaseValue = (n) => RARITIES[n.rarity].release * (1 + n.belt);
+
 export function releaseNinja(uid) {
-  const n = getNinja(uid);
-  if (!n || save.ninjas.length <= 1) return 0;
-  const gold = RARITIES[n.rarity].release * (1 + n.belt);
-  save.ninjas = save.ninjas.filter(x => x !== n);
-  save.squad = save.squad.filter(x => x !== uid);
+  return releaseMany([uid]).gold;
+}
+
+/** Release (sell) several ninjas at once. Always keeps at least one ninja; their weapons go back to storage. */
+export function releaseMany(uids) {
+  const ids = new Set(uids);
+  const gone = save.ninjas.filter(n => ids.has(n.uid));
+  if (!gone.length || gone.length >= save.ninjas.length) return { count: 0, gold: 0 };
+  const gold = gone.reduce((a, n) => a + releaseValue(n), 0);
+  save.ninjas = save.ninjas.filter(n => !ids.has(n.uid));
+  save.squad = save.squad.filter(x => !ids.has(x));
   save.gold += gold;
   persist();
-  return gold;
+  return { count: gone.length, gold };
 }
 
 export function renameNinja(uid, name) {

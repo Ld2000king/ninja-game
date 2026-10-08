@@ -14,7 +14,7 @@ import { Battle, SPELLS } from './game/battle.js';
 import { ninjaSpec, ninjaStats, power, stageWaves, stagePower } from './game/stats.js';
 import {
   save, persist, resetSave, xpForLevel, addXp, squadSize, getNinja, getItem, weaponOf, statsOf, powerOf, ownerOf, inSquad,
-  toggleSquad, autoSquad, equip, beltStatus, promote, releaseNinja, renameNinja, buyWeapon, grantWeapon, sellPrice, sellItem,
+  toggleSquad, autoSquad, equip, beltStatus, promote, releaseNinja, releaseMany, releaseValue, renameNinja, buyWeapon, grantWeapon, sellPrice, sellItem,
   isUnlocked, summon, SUMMON_COST, SUMMON10_COST, MAX_ROSTER,
 } from './game/save.js';
 import { MODES, getModePref, setModePref, detectMode, activeMode, applyMode } from './game/device.js';
@@ -52,6 +52,7 @@ let battle = null;
 let town = null;
 let selectedStage = null;
 let dojoFilter = 'all';
+let dojoPick = null; // Set of picked ninja uids while bulk-delete mode is on
 let shopTab = 'buy';
 
 // ───────────────────────── helpers
@@ -89,7 +90,8 @@ function ninjaCard(n, opts = {}) {
   const r = RARITIES[n.rarity];
   const w = weaponOf(n);
   return `
-    <div class="card r-${n.rarity} ${opts.cls || ''}" data-ninja="${n.uid}" style="--rc:${r.color};--rd:${r.dark}">
+    <div class="card r-${n.rarity} ${opts.cls || ''} ${opts.pick != null ? 'pickable' : ''} ${opts.pick ? 'picked' : ''}" data-ninja="${n.uid}" style="--rc:${r.color};--rd:${r.dark}">
+      ${opts.pick != null ? `<i class="pick-mark">✓</i><button class="card-info" data-info="${n.uid}" title="פרטים">i</button>` : ''}
       <div class="card-art"><img src="${portrait(specOf(n), 120)}" alt=""></div>
       ${w ? `<img class="card-weapon" src="${weaponIcon(w, 40)}" alt="" title="${w.name}">` : ''}
       <div class="card-name">${n.name}</div>
@@ -129,6 +131,7 @@ function go(name, arg) {
   if (battle) { battle.destroy(); battle = null; }
   if (town) { town.destroy(); town = null; }
   if (current === 'battle' && name !== 'battle') try { screen.orientation?.unlock?.(); } catch { /* unsupported */ }
+  if (name !== current) dojoPick = null;
   current = name;
   document.body.classList.toggle('in-battle', name === 'battle');
   closeModal();
@@ -253,6 +256,65 @@ function renderTown() {
   });
 }
 
+// ───────────────────────── BULK SELL (dojo + summon results)
+/**
+ * Lets the player tap ninja cards to pick them, then sell them all at once.
+ * pick: Set of uids, pool(): ninjas the quick-select chips work on, render(): redraws the cards.
+ */
+function bindPicker(root, { pick, pool, render, onSold, squadChip = false }) {
+  const bar = root.querySelector('.pick-bar');
+  const drawBar = () => {
+    const list = [...pick].map(getNinja).filter(Boolean);
+    const gold = list.reduce((a, n) => a + releaseValue(n), 0);
+    bar.innerHTML = `
+      <span class="pick-sum">נבחרו <b>${list.length}</b> · 🪙 <b>${fmt(gold)}</b></span>
+      <div class="pick-quick">
+        <button data-pick="all">הכל</button>
+        ${squadChip ? '<button data-pick="free">מחוץ לחוליה</button>' : ''}
+        <button data-pick="common">נפוצים</button>
+        <button data-pick="none">נקה</button>
+      </div>
+      <button class="btn small danger" data-pick="sell" ${list.length ? '' : 'disabled'}>💰 מכור ${list.length || ''}</button>`;
+  };
+  const update = () => {
+    root.querySelectorAll('.card.pickable').forEach(c => c.classList.toggle('picked', pick.has(c.dataset.ninja)));
+    drawBar();
+  };
+  root.addEventListener('click', (e) => {
+    const info = e.target.closest('[data-info]');
+    if (info) return openNinja(info.dataset.info);
+    const q = e.target.closest('[data-pick]');
+    if (q) {
+      const k = q.dataset.pick;
+      if (k === 'sell') return sellPicked();
+      if (k === 'none') pick.clear();
+      else pool().filter(n => k === 'all' || (k === 'free' && !inSquad(n.uid)) || (k === 'common' && n.rarity === 'common' && !inSquad(n.uid))).forEach(n => pick.add(n.uid));
+      return update();
+    }
+    const c = e.target.closest('.card.pickable');
+    if (c) { pick.has(c.dataset.ninja) ? pick.delete(c.dataset.ninja) : pick.add(c.dataset.ninja); update(); }
+  });
+  function sellPicked() {
+    const list = [...pick].map(getNinja).filter(Boolean);
+    if (!list.length) return;
+    if (list.length >= save.ninjas.length) return toast('חייב להשאיר לפחות נינג׳ה אחד בדוג׳ו');
+    const gold = list.reduce((a, n) => a + releaseValue(n), 0);
+    const squad = list.filter(n => inSquad(n.uid)).length;
+    const belted = list.filter(n => n.belt > 0).length;
+    const rare = list.filter(n => RARITIES[n.rarity].order >= 2).length;
+    const notes = [squad && `${squad} בחוליה`, belted && `${belted} עם חגורה`, rare && `${rare} אפיים/אגדיים`].filter(Boolean);
+    if (!confirm(`למכור ${list.length} נינג׳ות תמורת ${fmt(gold)} זהב?${notes.length ? `\nשים לב: ${notes.join(', ')}.` : ''}\nהנשקים שלהם יחזרו למחסן.`)) return;
+    const res = releaseMany(list.map(n => n.uid));
+    pick.clear();
+    toast(`💰 נמכרו ${res.count} נינג׳ות · +${fmt(res.gold)} זהב`);
+    refreshStats();
+    onSold?.();
+  }
+  render?.();
+  update();
+  return update;
+}
+
 // ───────────────────────── DOJO
 function renderDojo() {
   const size = squadSize();
@@ -285,12 +347,14 @@ function renderDojo() {
       <section class="panel roster-panel">
         <div class="row between">
           <h2>הנינג׳ות שלך <small>${save.ninjas.length}/${MAX_ROSTER}</small> ${ready ? `<span class="ready-pill">🥋 ${ready} מוכנים למבחן חגורה</span>` : ''}</h2>
+          <button class="btn small ${dojoPick ? 'primary' : ''}" id="multi">${dojoPick ? '✓ סיום מחיקה' : '🗑️ מחיקה מרובה'}</button>
           <div class="filters">
             <button data-f="all" class="${dojoFilter === 'all' ? 'on' : ''}">הכל</button>
             ${RARITY_ORDER.map(r => `<button data-f="${r}" class="${dojoFilter === r ? 'on' : ''}" style="--rc:${RARITIES[r].color}">${RARITIES[r].name}</button>`).join('')}
           </div>
         </div>
-        <div class="grid">${list.map(n => ninjaCard(n)).join('') || '<p class="muted">אין נינג׳ות בקטגוריה הזו.</p>'}</div>
+        ${dojoPick ? '<div class="pick-bar"></div><p class="muted tiny">לחץ על נינג׳ות כדי לבחור אותן למחיקה. מקבלים זהב על כל נינג׳ה, והנשקים שלהם חוזרים למחסן.</p>' : ''}
+        <div class="grid">${list.map(n => ninjaCard(n, dojoPick ? { pick: dojoPick.has(n.uid) } : {})).join('') || '<p class="muted">אין נינג׳ות בקטגוריה הזו.</p>'}</div>
       </section>
     </div>`;
   screenEl.querySelector('#auto').onclick = () => { autoSquad(); renderDojo(); };
@@ -299,13 +363,22 @@ function renderDojo() {
     const b = e.target.closest('[data-f]');
     if (b) { dojoFilter = b.dataset.f; renderDojo(); }
   });
+  screenEl.querySelector('#multi').onclick = () => { dojoPick = dojoPick ? null : new Set(); renderDojo(); };
+  if (dojoPick) {
+    bindPicker(screenEl.querySelector('.roster-panel'), {
+      pick: dojoPick, squadChip: true,
+      pool: () => list,
+      onSold: () => { dojoPick = null; renderDojo(); },
+    });
+  }
   screenEl.querySelector('.dojo-screen').addEventListener('click', (e) => {
+    if (dojoPick && e.target.closest('.roster-panel')) return; // handled by the picker
     const c = e.target.closest('[data-ninja]');
     if (c) openNinja(c.dataset.ninja);
   });
 }
 
-const STAT_ROWS = [['hp', 'חיים'], ['atk', 'נזק למכה'], ['aspd', 'התקפות/שנייה'], ['crit', 'סיכוי קריטי', true], ['armor', 'שריון', true]];
+const STAT_ROWS = [['hp', '❤️ חיים'], ['atk', '⚔️ נזק'], ['aspd', '💨 מהירות'], ['crit', '🎯 קריטי', true], ['armor', '🛡️ שריון', true]];
 
 function openNinja(uid) {
   const n = getNinja(uid);
@@ -316,62 +389,62 @@ function openNinja(uid) {
   const bare = ninjaStats(n, null);
   const bs = beltStatus(n);
   const trait = TRAITS[n.trait];
+  const ab = w && WEAPON_TYPES[w.type].ability;
   const fmtStat = (k, v, pct) => pct ? Math.round(v * 100) + '%' : k === 'aspd' ? v.toFixed(2) : fmt(v);
   const m = openModal(`
     <button class="close" data-close>✕</button>
-    <div class="unit-detail r-${n.rarity}" style="--rc:${r.color};--rd:${r.dark}">
-      <div class="ud-art">
-        <img src="${portrait(specOf(n), 240)}" alt="">
-        <div class="ud-rarity">${r.name}</div>
-        <div class="ud-belt" style="--bc:${BELTS[n.belt].color};color:${n.belt <= 2 ? '#3b200c' : '#fff'};text-shadow:none">חגורה ${BELTS[n.belt].name}</div>
-      </div>
-      <div class="ud-info">
-        <div class="row gap"><h2>${n.name}</h2><button class="icon-btn small" id="rename" title="שנה שם">✏️</button></div>
-        <div class="row gap">
-          <span class="pill" title="${trait.desc}">✦ ${trait.name}: ${trait.desc}</span>
-          <span class="pill">⚡ כוח ${fmt(power(st))}</span>
+    <div class="nd r-${n.rarity}" style="--rc:${r.color};--rd:${r.dark}">
+      <div class="nd-info">
+        <div class="nd-head">
+          <h2>${n.name}</h2><button class="icon-btn small" id="rename" title="שנה שם">✏️</button>
         </div>
+        <span class="pill nd-trait">✦ <b>${trait.name}</b> ${trait.desc}</span>
 
-        <h3>🥋 חגורה</h3>
-        <div class="belt-ladder">
-          ${BELTS.map((b, i) => `<div class="${i <= n.belt ? 'got' : ''} ${i === n.belt ? 'cur' : ''}" style="--bc:${b.color}" title="${b.name} – ×${b.mult}"><i></i><small>${b.name}</small></div>`).join('')}
-        </div>
-        ${bs.max ? '<p class="muted">🏆 הגיע לחגורה השחורה – הדרגה הגבוהה ביותר!</p>' : `
-          <div class="belt-next">
-            <div class="col tiny-gap grow">
-              <small>ניסיון קרב למבחן חגורה ${bs.next.name}: ${fmt(Math.min(n.xp, bs.next.xp))}/${fmt(bs.next.xp)}</small>
-              <div class="bar"><i style="width:${Math.min(100, (n.xp / bs.next.xp) * 100)}%"></i></div>
-            </div>
-            <button class="btn ${bs.xpOk && bs.goldOk ? 'primary' : ''}" id="promote" ${bs.xpOk && bs.goldOk ? '' : 'disabled'}>🥋 מבחן חגורה (🪙 ${fmt(bs.next.cost)})</button>
-          </div>
-          <p class="muted tiny">חגורה ${bs.next.name}: חיים ונזק בסיס ×${bs.next.mult} (כרגע ×${BELTS[n.belt].mult}). ניסיון מרוויחים בקרבות.</p>`}
-
-        <h3>📊 נתונים</h3>
-        <div class="stat-table">
+        <div class="nd-stats">
           ${STAT_ROWS.map(([k, label, pct]) => {
             const diff = st[k] - bare[k];
-            return `<div><span>${label}</span><b>${fmtStat(k, st[k], pct)}</b>${w && Math.abs(diff) > 0.001 ? `<em>${diff > 0 ? '+' : ''}${fmtStat(k, diff, pct)} מהנשק</em>` : '<em></em>'}</div>`;
+            return `<div><span>${label}</span><b>${fmtStat(k, st[k], pct)}</b><em>${w && Math.abs(diff) > 0.001 ? `${diff > 0 ? '+' : ''}${fmtStat(k, diff, pct)} 🗡️` : ''}</em></div>`;
           }).join('')}
         </div>
 
-        <h3>🗡️ נשק</h3>
-        <div class="equip-row">
-          ${w ? `<img src="${weaponIcon(w, 72)}" alt=""><div class="grow"><b>${w.name}</b>
+        <div class="nd-block">
+          <div class="belt-ladder">
+            ${BELTS.map((b, i) => `<div class="${i <= n.belt ? 'got' : ''} ${i === n.belt ? 'cur' : ''}" style="--bc:${b.color}" title="${b.name} – ×${b.mult}"><i></i><small>${b.name}</small></div>`).join('')}
+          </div>
+          ${bs.max ? '<p class="muted tiny nd-max">🏆 חגורה שחורה – הדרגה הגבוהה ביותר!</p>' : `
+          <div class="belt-next">
+            <div class="col tiny-gap grow">
+              <small>ניסיון למבחן חגורה ${bs.next.name}: <b>${fmt(Math.min(n.xp, bs.next.xp))}/${fmt(bs.next.xp)}</b></small>
+              <div class="bar"><i style="width:${Math.min(100, (n.xp / bs.next.xp) * 100)}%"></i></div>
+            </div>
+            <button class="btn small ${bs.xpOk && bs.goldOk ? 'primary' : ''}" id="promote" ${bs.xpOk && bs.goldOk ? '' : 'disabled'}
+              title="חיים ונזק בסיס ×${bs.next.mult} (כרגע ×${BELTS[n.belt].mult})">🥋 מבחן ×${bs.next.mult} · 🪙 ${fmt(bs.next.cost)}</button>
+          </div>`}
+        </div>
+
+        <div class="nd-block equip-row">
+          ${w ? `<img src="${weaponIcon(w, 64)}" alt=""><div class="grow"><b>${w.name}</b>
             <small class="muted">${RARITIES[w.rarity].name} · DPS ${dps(w).toFixed(1)} · ${speedLabel(w.aspd)}</small>
-            ${WEAPON_TYPES[w.type].ability ? `<small>✦ ${WEAPON_TYPES[w.type].ability.name} – ${WEAPON_TYPES[w.type].ability.desc}</small>` : ''}</div>`
-          : `<div class="grow muted">ידיים חשופות – בלי נשק ובלי יכולת מיוחדת.</div>`}
+            ${ab ? `<small class="nd-ability" title="${ab.desc}">✦ ${ab.name} – ${ab.desc}</small>` : ''}</div>`
+          : `<div class="grow muted">🤜 ידיים חשופות – בלי נשק ובלי יכולת מיוחדת.</div>`}
           <div class="col tiny-gap">
-            <button class="btn small primary" id="change-w">🔄 ${w ? 'החלף' : 'צייד'} נשק</button>
+            <button class="btn small primary" id="change-w">🔄 ${w ? 'החלף' : 'צייד'}</button>
             ${w ? '<button class="btn small ghost" id="remove-w">הסר</button>' : ''}
           </div>
         </div>
-
-        <div class="row gap actions">
-          <button class="btn ${inSquad(uid) ? 'ghost' : 'primary'}" id="squad">${inSquad(uid) ? '➖ הוצא מהחוליה' : '➕ הכנס לחוליה'}</button>
-          <button class="btn danger small" id="release">שחרר (🪙 ${fmt(RARITIES[n.rarity].release * (1 + n.belt))})</button>
-        </div>
       </div>
-    </div>`, 'wide');
+
+      <div class="nd-side">
+        <div class="nd-art">
+          <img src="${portrait(specOf(n), 240)}" alt="">
+          <div class="nd-rarity">${r.name}</div>
+          <div class="nd-belt" style="--bc:${BELTS[n.belt].color};color:${n.belt <= 2 ? '#3b200c' : '#fff'}">חגורה ${BELTS[n.belt].name}</div>
+        </div>
+        <div class="nd-power">⚡ כוח <b>${fmt(power(st))}</b></div>
+        <button class="btn small ${inSquad(uid) ? 'ghost' : 'primary'}" id="squad">${inSquad(uid) ? '➖ הוצא מהחוליה' : '➕ הכנס לחוליה'}</button>
+        <button class="btn small danger" id="release">🗑️ מכור · 🪙 ${fmt(releaseValue(n))}</button>
+      </div>
+    </div>`, 'wide nd-modal');
   const refresh = () => { refreshStats(); if (current === 'dojo') renderDojo(); openNinja(uid); };
   m.querySelector('#rename').onclick = () => { const nm = prompt('שם חדש לנינג׳ה:', n.name); if (nm) { renameNinja(uid, nm); refresh(); } };
   m.querySelector('#promote')?.addEventListener('click', () => {
@@ -381,10 +454,11 @@ function openNinja(uid) {
   m.querySelector('#remove-w')?.addEventListener('click', () => { equip(uid, null); refresh(); });
   m.querySelector('#squad').onclick = () => { const err = toggleSquad(uid); if (err) return toast(err); refresh(); };
   m.querySelector('#release').onclick = () => {
-    if (save.ninjas.length <= 1) return toast('אי אפשר לשחרר את הנינג׳ה האחרון');
-    if (!confirm(`לשחרר את ${n.name}? הנשק שלו יחזור למחסן.`)) return;
+    if (save.ninjas.length <= 1) return toast('אי אפשר למכור את הנינג׳ה האחרון');
+    if (!confirm(`למכור את ${n.name} תמורת ${fmt(releaseValue(n))} זהב? הנשק שלו יחזור למחסן.`)) return;
     const g = releaseNinja(uid);
-    toast(`${n.name} שוחרר/ה. +${fmt(g)} זהב`);
+    toast(`${n.name} נמכר/ה. +${fmt(g)} זהב`);
+    document.querySelector(`.summon-box [data-ninja="${uid}"]`)?.closest('.flip')?.remove();
     closeModal(); refreshStats(); if (current === 'dojo') renderDojo();
   };
 }
@@ -541,19 +615,36 @@ function renderSummon() {
     save.gold -= cost;
     const res = Array.from({ length: count }, () => summon());
     persist(); refreshStats();
-    const el = document.getElementById('results');
-    el.innerHTML = `<h2>תוצאות</h2><div class="grid reveal">${res.map((n, i) =>
-      `<div class="flip" style="animation-delay:${i * 0.12}s">${ninjaCard(n, { badge: TRAITS[n.trait].name })}
-        <div class="born"><span>❤️ ${n.base.hp}</span><span>⚔️ ${n.base.atk}</span></div></div>`).join('')}</div>`;
-    el.querySelector('.grid').addEventListener('click', (e) => {
-      const c = e.target.closest('[data-ninja]');
-      if (c) openNinja(c.dataset.ninja);
-    });
+    showSummonResults(res);
     const best = res.reduce((a, b) => RARITIES[b.rarity].order > RARITIES[a.rarity].order ? b : a);
     if (best.rarity === 'legendary') toast(`✨ אגדי! ${best.name} הצטרף לדוג׳ו ✨`);
   };
   screenEl.querySelector('#s1').onclick = () => doSummon(1, SUMMON_COST);
   screenEl.querySelector('#s10').onclick = () => doSummon(10, SUMMON10_COST);
+}
+
+// Summon results: every new ninja can be picked and sold on the spot.
+function showSummonResults(res) {
+  const el = document.getElementById('results');
+  const pick = new Set();
+  const left = () => res.filter(n => getNinja(n.uid));
+  el.innerHTML = `
+    <div class="row between"><h2>תוצאות</h2><small class="muted">לא צריך מישהו? בחר ומכור אותו מיד.</small></div>
+    <div class="summon-box"><div class="pick-bar"></div><div class="grid reveal"></div></div>`;
+  const box = el.querySelector('.summon-box');
+  const grid = box.querySelector('.grid');
+  let first = true;
+  const render = () => {
+    const list = left();
+    grid.classList.toggle('reveal', first);
+    grid.innerHTML = list.map((n, i) =>
+      `<div class="flip" style="animation-delay:${i * 0.12}s">${ninjaCard(n, { badge: TRAITS[n.trait].name, pick: pick.has(n.uid) })}
+        <div class="born"><span>❤️ ${n.base.hp}</span><span>⚔️ ${n.base.atk}</span></div></div>`).join('')
+      || '<p class="muted">כל הנינג׳ות מהזימון הזה נמכרו.</p>';
+    box.querySelector('.pick-bar').hidden = !list.length;
+    first = false;
+  };
+  const update = bindPicker(box, { pick, pool: left, render, onSold: () => { render(); update(); } });
 }
 
 // ───────────────────────── MAP
