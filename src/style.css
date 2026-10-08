@@ -762,3 +762,10 @@ body.mode-mobile .stage-panel > .row.gap:last-child {
   background: linear-gradient(180deg, rgba(243, 217, 164, 0.85), var(--paper-2) 40%);
   border-top: 2px solid var(--wood-dark);
 }
+
+/* phone held upright: the battle camera zooms in on the middle of the arena (see Battle.resize) */
+html { background: #f6e2b6; }
+body.mode-mobile.in-battle .topbar { display: none; }
+@media (orientation: portrait) {
+  body.mode-mobile .battle-stage { aspect-ratio: 600 / 560; }
+}

@@ -55,13 +55,14 @@ export class Battle {
     this.cloud = { a: 0, rx: 100, ry: 55, puffs: [], popT: 0 };
     this.sideMaxHp = { player: 0, enemy: 0 };
 
-    this.placeArmy(squad, 'player', 0);
-    this.placeArmy(waves[0], 'enemy', 0);
-    this.initialPlayerHp = this.sideHp('player');
-
+    // size the camera first, so armies can be placed inside the visible part of the arena
     this.resize = this.resize.bind(this);
     window.addEventListener('resize', this.resize);
     this.resize();
+
+    this.placeArmy(squad, 'player', 0);
+    this.placeArmy(waves[0], 'enemy', 0);
+    this.initialPlayerHp = this.sideHp('player');
     this.bindInput();
     this.showBanner('READY!', 1.1, () => this.showBanner('FIGHT!', 0.8));
     this.start();
@@ -87,6 +88,7 @@ export class Battle {
   }
 
   addUnit(spec, side, homeX, homeY, extra = {}) {
+    homeX = clamp(homeX, this.viewX + 34, this.viewX + this.viewW - 34);
     const s = spec.stats;
     const look = spec.look;
     const p = extra.power || 1;
@@ -135,13 +137,17 @@ export class Battle {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     this.canvas.width = Math.max(1, Math.round(r.width * dpr));
     this.canvas.height = Math.max(1, Math.round(r.height * dpr));
-    this.arena = getArena(this.stage.region.arena, this.canvas.width > W * 1.2 ? 2 : 1);
+    // Camera: a canvas narrower than the arena (phone held upright) zooms in on the middle,
+    // where the armies and the fight cloud are, and crops only the empty sides.
+    this.viewW = r.height > 0 ? clamp(r.width / r.height * H, 600, W) : W;
+    this.viewX = (W - this.viewW) / 2;
+    this.arena = getArena(this.stage.region.arena, this.canvas.width / this.viewW > 1.2 ? 2 : 1);
   }
 
   bindInput() {
     const toWorld = (e) => {
       const r = this.canvas.getBoundingClientRect();
-      return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H };
+      return { x: this.viewX + (e.clientX - r.left) / r.width * this.viewW, y: (e.clientY - r.top) / r.height * H };
     };
     const move = (e) => { this.mouse = toWorld(e); };
     const leave = () => { this.mouse = null; };
@@ -565,8 +571,8 @@ export class Battle {
   // ───────────── render
   render() {
     const ctx = this.ctx;
-    const k = this.canvas.width / W;
-    ctx.setTransform(k, 0, 0, k, 0, 0);
+    const k = this.canvas.width / this.viewW;
+    ctx.setTransform(k, 0, 0, k, -this.viewX * k, 0);
     ctx.direction = 'ltr';
     ctx.clearRect(0, 0, W, H);
     if (this.shake > 0) ctx.translate(rand(-1, 1) * this.shake * 0.6, rand(-1, 1) * this.shake * 0.4);
