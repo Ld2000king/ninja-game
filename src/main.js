@@ -247,12 +247,15 @@ function renderTown() {
         <div class="panel mini-panel"><b>🗡️ ${save.items.length}</b><small>נשקים במחסן</small></div>
         <div class="panel mini-panel"><b>⭐ ${Object.values(save.progress).reduce((a, b) => a + b, 0)}/${ALL_STAGES.length * 3}</b><small>כוכבים</small></div>
       </div>
-      <p class="hint">לחץ על בניין כדי להיכנס אליו.</p>
+      <p class="hint">לחץ על בניין כדי להיכנס אליו. המגרשים עם 🚧 ייפתחו בקרוב.</p>
     </div>`;
   town = new TownScene(document.getElementById('town-canvas'), {
     looks: squadNinjas().map(n => specOf(n).look),
     townName: save.town,
-    onEnter: (id) => go({ shrine: 'summon', dojo: 'dojo', shop: 'shop', balloon: 'map' }[id]),
+    onEnter: (id, b) => {
+      if (b?.soon) return toast(`🚧 ${b.label} – בקרוב! ${b.soon}`);
+      go({ shrine: 'summon', dojo: 'dojo', shop: 'shop', balloon: 'map' }[id]);
+    },
   });
 }
 
