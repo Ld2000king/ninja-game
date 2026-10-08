@@ -56,8 +56,15 @@ export class TownScene {
     }));
     this.resize = this.resize.bind(this);
     window.addEventListener('resize', this.resize);
+    // the canvas can be any shape (phone held upright or sideways), so follow its size directly
+    this.ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(this.resize) : null;
+    this.ro?.observe(canvas);
     this.resize();
-    const toWorld = (e) => { const r = canvas.getBoundingClientRect(); return [(e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H]; };
+    const toWorld = (e) => {
+      const r = canvas.getBoundingClientRect();
+      const k = Math.min(r.width / W, r.height / H);
+      return [(e.clientX - r.left - (r.width - W * k) / 2) / k, (e.clientY - r.top - (r.height - H * k) / 2) / k];
+    };
     this.onMove = (e) => {
       const [x, y] = toWorld(e);
       const b = [...BUILDINGS].reverse().find(b => x >= b.box[0] && x <= b.box[0] + b.box[2] && y >= b.box[1] && y <= b.box[1] + b.box[3]);
@@ -85,6 +92,7 @@ export class TownScene {
     this.destroyed = true;
     cancelAnimationFrame(this.raf);
     window.removeEventListener('resize', this.resize);
+    this.ro?.disconnect();
     this.canvas.removeEventListener('pointermove', this.onMove);
     this.canvas.removeEventListener('click', this.onClick);
     this.canvas.removeEventListener('pointerleave', this.onLeave);
@@ -96,7 +104,8 @@ export class TownScene {
     this.canvas.width = Math.max(1, Math.round(r.width * dpr));
     this.canvas.height = Math.max(1, Math.round(r.height * dpr));
     // on a small screen the signs are drawn larger so they stay readable
-    this.signScale = r.width < 700 ? Math.min(1.4, 600 / Math.max(1, r.width)) : 1;
+    const shown = Math.min(r.width, r.height * W / H); // on-screen width of the scene
+    this.signScale = shown < 700 ? Math.min(1.4, 600 / Math.max(1, shown)) : 1;
   }
 
   update(dt) {
@@ -113,9 +122,20 @@ export class TownScene {
   render() {
     const ctx = this.ctx;
     const t = this.t;
-    const k = this.canvas.width / W;
-    ctx.setTransform(k, 0, 0, k, 0, 0);
+    // fit the whole scene in the canvas and let the sky fill whatever space is left over
+    const cw = this.canvas.width, ch = this.canvas.height;
+    const k = Math.min(cw / W, ch / H);
+    const ox = (cw - W * k) / 2 / k, oy = (ch - H * k) / 2 / k;
+    ctx.setTransform(k, 0, 0, k, ox * k, oy * k);
+    const g = ctx.createLinearGradient(0, -oy, 0, H + oy);
+    g.addColorStop(0, '#6fbfee'); g.addColorStop(0.6, '#bfe6f8'); g.addColorStop(1, '#eef9fd');
+    ctx.fillStyle = g; ctx.fillRect(-ox, -oy, W + ox * 2, H + oy * 2);
     ctx.drawImage(this.sky, 0, 0, W, H);
+    // extra clouds in the space above and below the island on tall screens
+    for (let i = 0; oy > 20 && i < 8; i++) {
+      const x = ((i * 170 + t * (4 + (i % 3))) % 1300) - 150 - ox;
+      cloud(ctx, x, i % 2 ? -oy * (0.3 + (i % 3) * 0.2) : H + oy * (0.2 + (i % 4) * 0.18), 0.9 + (i % 3) * 0.3);
+    }
     // drifting clouds behind the island
     for (let i = 0; i < 4; i++) {
       const x = ((i * 290 + t * (6 + i * 2)) % 1300) - 150;
@@ -182,9 +202,6 @@ export class TownScene {
     c.width = W * 2; c.height = H * 2;
     const ctx = c.getContext('2d');
     ctx.scale(2, 2);
-    const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, '#6fbfee'); g.addColorStop(0.6, '#bfe6f8'); g.addColorStop(1, '#eef9fd');
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = 'rgba(255,250,220,0.9)';
     ctx.beginPath(); ctx.arc(110, 78, 36, 0, TAU); ctx.fill();
     ctx.fillStyle = 'rgba(255,250,220,0.35)';

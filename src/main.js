@@ -138,6 +138,7 @@ function go(name, arg) {
   ({ town: renderTown, dojo: renderDojo, shop: renderShop, summon: renderSummon, map: renderMap, battle: renderBattle })[name](arg);
   refreshStats();
   window.scrollTo(0, 0);
+  screenEl.scrollTop = 0;
 }
 const rerender = () => go(current);
 

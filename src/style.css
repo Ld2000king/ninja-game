@@ -689,3 +689,76 @@ body.mode-mobile .pick-sum { order: 1; flex: 1; }
 body.mode-mobile .pick-bar .btn { order: 2; flex: 0 0 auto; }
 body.mode-mobile .pick-quick { order: 3; flex-basis: 100%; flex-wrap: nowrap; overflow-x: auto; }
 body.mode-mobile .pick-quick button { white-space: nowrap; padding: 5px 12px; }
+
+/* ═════════ v5: mobile = full-screen app shell ═════════
+   The page itself never scrolls: header + screen + tab bar exactly fill the viewport.
+   Only long lists scroll, inside the screen area. */
+html:has(body.mode-mobile), body.mode-mobile { height: 100%; overflow: hidden; overscroll-behavior: none; }
+body.mode-mobile { position: fixed; inset: 0; background-attachment: scroll; }
+body.mode-mobile #app {
+  height: 100dvh; max-width: none; display: flex; flex-direction: column;
+  padding: max(6px, env(safe-area-inset-top)) max(6px, env(safe-area-inset-right)) calc(76px + env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
+}
+body.mode-mobile .topbar { position: relative; top: auto; flex: none; margin-bottom: 6px; }
+body.mode-mobile #screen {
+  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  overscroll-behavior: contain; -webkit-overflow-scrolling: touch; border-radius: 14px;
+}
+body.mode-mobile #screen::-webkit-scrollbar { display: none; }
+body.mode-mobile .pick-bar { top: 0; }
+body.mode-mobile .hint { display: none; }
+
+/* town: the island scene fills all the space between header and tab bar */
+body.mode-mobile .town-screen { width: 100%; min-width: 0; height: 100%; gap: 6px; }
+body.mode-mobile .town-wrap { flex: 1; min-height: 0; aspect-ratio: auto; }
+body.mode-mobile .town-info { flex: none; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+body.mode-mobile .town-info .mini-panel { padding: 4px 2px; border-width: 2px; box-shadow: 0 2px 0 var(--wood-deep); }
+body.mode-mobile .town-info .mini-panel b { font-size: 13px; white-space: nowrap; }
+body.mode-mobile .town-info .mini-panel small { font-size: 9.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* map: map on top, stage details scroll underneath */
+body.mode-mobile .map-screen { display: flex; flex-direction: column; height: 100%; gap: 6px; }
+body.mode-mobile .map-panel { flex: none; padding: 4px; }
+body.mode-mobile .stage-panel { flex: 1; min-height: 0; overflow-y: auto; }
+
+/* battle fills the screen */
+body.mode-mobile .battle-screen { height: 100%; }
+body.mode-mobile.in-battle #app { padding-bottom: max(6px, env(safe-area-inset-bottom)); }
+
+/* phone held sideways: tab bar becomes a side rail so the screen keeps its height */
+@media (orientation: landscape) and (max-height: 560px) {
+  body.mode-mobile #app { padding-bottom: max(6px, env(safe-area-inset-bottom)); padding-right: calc(84px + env(safe-area-inset-right)); }
+  body.mode-mobile .nav {
+    top: 0; bottom: 0; left: auto; right: 0; width: calc(78px + env(safe-area-inset-right));
+    flex-direction: column; justify-content: center; gap: 4px;
+    padding: max(6px, env(safe-area-inset-top)) calc(6px + env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) 6px;
+    border-top: 0; border-left: 3px solid var(--wood-dark); box-shadow: -6px 0 18px rgba(60, 25, 5, 0.3);
+  }
+  body.mode-mobile .nav button { flex: 0 1 auto; padding: 5px 2px; }
+  body.mode-mobile .nav button i { font-size: 21px; }
+  body.mode-mobile .nav button span { font-size: 10.5px; }
+  /* battle sideways: compact spell column that always fits the screen height */
+  body.mode-mobile .battle-bar { padding: 4px 6px; gap: 6px; overflow: hidden; }
+  body.mode-mobile .battle-bar .spells { gap: 5px; }
+  body.mode-mobile .battle-bar .spell { width: 62px; height: 40px; border-width: 2.5px; }
+  body.mode-mobile .battle-bar .spell .ic { font-size: 20px; }
+  body.mode-mobile .battle-bar .row.gap { gap: 5px; }
+  body.mode-mobile .battle-bar .row.gap .btn { width: 62px; min-height: 30px; padding: 2px; font-size: 13px; }
+  body.mode-mobile .battle-hud { padding: 3px 10px; }
+  body.mode-mobile .topbar { padding: 4px 10px; margin-bottom: 5px; }
+  body.mode-mobile .logo { font-size: 19px; }
+  body.mode-mobile .icon-btn { width: 32px; height: 32px; font-size: 15px; }
+  body.mode-mobile #toast { bottom: calc(12px + env(safe-area-inset-bottom)); }
+  body.mode-mobile .town-screen { width: 100%; }
+  body.mode-mobile .map-screen { display: grid; grid-template-columns: minmax(0, calc((100dvh - 84px) * 1000 / 560 + 8px)) minmax(220px, 1fr); align-items: stretch; }
+  body.mode-mobile .map-panel { align-self: start; }
+  body.mode-mobile .summon-screen { grid-template-columns: minmax(220px, 0.8fr) 1fr; }
+  body.mode-mobile.in-battle #app { padding-right: max(6px, env(safe-area-inset-right)); }
+}
+body.mode-mobile .stage-panel > * { flex-shrink: 0; }
+/* the fight button is always visible at the bottom of the stage panel */
+body.mode-mobile .stage-panel > .row.gap:last-child {
+  position: sticky; bottom: -12px; z-index: 2; margin: auto -12px -12px; padding: 8px 12px 10px;
+  background: linear-gradient(180deg, rgba(243, 217, 164, 0.85), var(--paper-2) 40%);
+  border-top: 2px solid var(--wood-dark);
+}
