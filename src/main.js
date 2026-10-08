@@ -620,8 +620,7 @@ function renderSummon() {
     const res = Array.from({ length: count }, () => summon());
     persist(); refreshStats();
     showSummonResults(res);
-    const best = res.reduce((a, b) => RARITIES[b.rarity].order > RARITIES[a.rarity].order ? b : a);
-    if (best.rarity === 'legendary') toast(`✨ אגדי! ${best.name} הצטרף לדוג׳ו ✨`);
+    playSummonReveal(res);
   };
   screenEl.querySelector('#s1').onclick = () => doSummon(1, SUMMON_COST);
   screenEl.querySelector('#s10').onclick = () => doSummon(10, SUMMON10_COST);
@@ -649,6 +648,101 @@ function showSummonResults(res) {
     first = false;
   };
   const update = bindPicker(box, { pick, pool: left, render, onSold: () => { render(); update(); } });
+}
+
+// Summon reveal: a full-screen window where each new ninja bursts out of the shrine orb, one after another.
+function playSummonReveal(res) {
+  document.querySelector('.summon-fx')?.remove();
+  const quick = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const fx = document.createElement('div');
+  fx.className = 'summon-fx';
+  fx.innerHTML = `
+    <div class="sfx-top">
+      <span class="sfx-count"></span>
+      ${res.length > 1 ? '<button class="sfx-skip">דלג ⏭</button>' : ''}
+    </div>
+    <div class="sfx-stage">
+      <div class="sfx-rays"></div>
+      <div class="torii sfx-torii"><div class="t-top"></div><div class="t-beam"></div><div class="t-l"></div><div class="t-r"></div></div>
+      <div class="sfx-orb"></div>
+      <div class="sfx-flash"></div>
+      <div class="sfx-hero"></div>
+    </div>
+    ${res.length > 1 ? `<div class="sfx-strip">${res.map(() => '<i></i>').join('')}</div>` : ''}
+    <p class="sfx-tap">לחץ כדי להמשיך</p>`;
+  document.body.appendChild(fx);
+  const stage = fx.querySelector('.sfx-stage'), hero = fx.querySelector('.sfx-hero');
+  let i = -1, phase = 'idle', timer = null;
+  const later = (ms, fn) => { clearTimeout(timer); timer = setTimeout(fn, quick ? Math.min(ms, 250) : ms); };
+
+  function charge() {
+    i++;
+    if (i >= res.length) return summary();
+    const n = res[i], r = RARITIES[n.rarity];
+    phase = 'charge';
+    fx.style.setProperty('--rc', r.color);
+    fx.style.setProperty('--rd', r.dark);
+    fx.dataset.r = n.rarity;
+    fx.querySelector('.sfx-count').textContent = res.length > 1 ? `${i + 1}/${res.length}` : '';
+    hero.innerHTML = '';
+    stage.className = 'sfx-stage charging';
+    void stage.offsetWidth; // restart the CSS animations
+    stage.classList.add('go');
+    later(r.order >= 2 ? 1500 : 950, reveal);
+  }
+
+  function reveal() {
+    const n = res[i], r = RARITIES[n.rarity], t = TRAITS[n.trait];
+    phase = 'reveal';
+    stage.className = `sfx-stage revealed r-${n.rarity}`;
+    hero.innerHTML = `
+      ${n.rarity === 'legendary' ? '<div class="sfx-legend">✨ אגדי! ✨</div>' : ''}
+      <div class="sfx-art"><img src="${portrait(specOf(n), 240)}" alt=""></div>
+      <div class="sfx-rar">${r.name}</div>
+      <h2 class="sfx-name">${n.name}</h2>
+      <div class="sfx-info"><span>✦ ${t.name}</span><span>❤️ ${n.base.hp}</span><span>⚔️ ${n.base.atk}</span></div>`;
+    const dot = fx.querySelectorAll('.sfx-strip i')[i];
+    if (dot) { dot.style.setProperty('--rc', r.color); dot.innerHTML = `<img src="${portrait(specOf(n), 64)}" alt="">`; dot.className = 'got'; }
+    // a single summon stays on screen until tapped; a 10x summon moves on by itself
+    if (res.length > 1) later(r.order >= 2 ? 2400 : 1500, () => (i < res.length - 1 ? charge() : summary()));
+    else clearTimeout(timer);
+  }
+
+  function summary() {
+    clearTimeout(timer);
+    if (res.length === 1) return close();
+    phase = 'summary';
+    fx.classList.add('done');
+    stage.className = 'sfx-stage';
+    fx.querySelector('.sfx-count').textContent = '';
+    fx.querySelector('.sfx-skip')?.remove();
+    fx.querySelector('.sfx-strip')?.remove();
+    const counts = RARITY_ORDER.map(k => [k, res.filter(n => n.rarity === k).length]).filter(([, c]) => c);
+    hero.innerHTML = `
+      <h2 class="sfx-name">הצטרפו לדוג׳ו ${res.length} נינג׳ות!</h2>
+      <div class="sfx-sum-tags">${counts.map(([k, c]) => `<span style="--rc:${RARITIES[k].color}">${RARITIES[k].name} ×${c}</span>`).join('')}</div>
+      <div class="grid sfx-grid">${res.map((n, k) => `<div class="flip" style="animation-delay:${k * 0.05}s">${ninjaCard(n, { badge: TRAITS[n.trait].name })}</div>`).join('')}</div>
+      <button class="btn primary big sfx-done">✓ סיום</button>`;
+    fx.querySelector('.sfx-tap').textContent = 'אפשר למכור את מי שלא צריך בתוצאות הזימון';
+  }
+
+  function close() {
+    clearTimeout(timer);
+    document.removeEventListener('keydown', onKey);
+    fx.classList.add('out');
+    setTimeout(() => fx.remove(), 250);
+  }
+
+  // tap: skip the charge, or move on to the next ninja
+  fx.addEventListener('click', (e) => {
+    if (e.target.closest('.sfx-skip')) return summary();
+    if (e.target.closest('.sfx-done')) return close();
+    if (phase === 'charge') return reveal();
+    if (phase === 'reveal') return i < res.length - 1 ? charge() : summary();
+  });
+  const onKey = (e) => { if (e.key === 'Escape') (phase === 'summary' || res.length === 1 ? close() : summary()); };
+  document.addEventListener('keydown', onKey);
+  charge();
 }
 
 // ───────────────────────── MAP

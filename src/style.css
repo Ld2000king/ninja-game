@@ -769,3 +769,121 @@ body.mode-mobile.in-battle .topbar { display: none; }
 @media (orientation: portrait) {
   body.mode-mobile .battle-stage { aspect-ratio: 600 / 560; }
 }
+
+/* ═════════ v6: summon reveal window ═════════ */
+.summon-fx {
+  --rc: #fff; --rd: #888;
+  position: fixed; inset: 0; z-index: 90; overflow: hidden; color: #fff;
+  display: flex; flex-direction: column; align-items: center;
+  padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
+  background: radial-gradient(ellipse at 50% 55%, #4a2f66 0%, #24123a 45%, #0f0818 100%);
+  animation: fade 0.25s; -webkit-user-select: none; user-select: none; cursor: pointer;
+}
+.summon-fx.out { opacity: 0; transition: opacity 0.25s; }
+.summon-fx::before { /* drifting sparkles in the night sky */
+  content: ''; position: absolute; inset: -50%; pointer-events: none; opacity: 0.55;
+  background-image: radial-gradient(2px 2px at 20% 30%, #fff, transparent), radial-gradient(1.5px 1.5px at 70% 20%, #ffe7a0, transparent),
+    radial-gradient(2px 2px at 40% 80%, #d6a8ff, transparent), radial-gradient(1.5px 1.5px at 85% 65%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 10% 70%, #ffe7a0, transparent);
+  background-size: 260px 260px; animation: sfxDrift 40s linear infinite;
+}
+@keyframes sfxDrift { to { transform: translateY(260px); } }
+.sfx-top { position: relative; z-index: 3; width: 100%; max-width: 760px; display: flex; justify-content: space-between; align-items: center; min-height: 40px; }
+.sfx-count { font-family: 'Bangers', Impact, sans-serif; font-size: 30px; letter-spacing: 2px; direction: ltr; text-shadow: 0 2px 0 #000; }
+.sfx-skip { border: 2px solid rgba(255,255,255,0.6); background: rgba(255,255,255,0.12); color: #fff; font-weight: 800; font-size: 15px; border-radius: 999px; padding: 6px 16px; }
+.sfx-tap { position: relative; z-index: 3; margin: 6px 0 0; font-size: 13px; opacity: 0.7; animation: sfxBlink 1.6s ease-in-out infinite; }
+@keyframes sfxBlink { 50% { opacity: 0.3; } }
+
+.sfx-stage { position: relative; flex: 1; width: 100%; max-width: 760px; display: flex; align-items: center; justify-content: center; min-height: 0; }
+body .summon-fx .sfx-torii { position: absolute; top: 50%; left: 50%; margin: 0; transform: translate(-50%, -88%) scale(1.25); opacity: 0.9; transition: opacity 0.4s; }
+.sfx-stage.revealed .sfx-torii { opacity: 0.25; }
+.summon-fx.done .sfx-torii, .summon-fx.done .sfx-orb { display: none; }
+
+/* the orb charges up, glows in the rarity colour at the last moment, then bursts */
+.sfx-orb {
+  position: absolute; top: 50%; left: 50%; width: 90px; height: 90px; margin: -45px 0 0 -45px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff, #b45cff 55%, #3d0f80);
+  box-shadow: 0 0 40px #b45cff, 0 0 90px rgba(180, 92, 255, 0.6);
+  opacity: 0; transform: scale(0.3);
+}
+.sfx-stage.charging.go .sfx-orb { animation: sfxCharge 0.95s ease-in forwards; }
+.summon-fx[data-r="epic"] .sfx-stage.charging.go .sfx-orb,
+.summon-fx[data-r="legendary"] .sfx-stage.charging.go .sfx-orb { animation: sfxChargeBig 1.5s ease-in forwards; }
+.summon-fx[data-r="epic"] .sfx-stage.charging.go,
+.summon-fx[data-r="legendary"] .sfx-stage.charging.go { animation: sfxShake 0.12s 0.9s 5; }
+@keyframes sfxCharge {
+  0% { opacity: 0; transform: scale(0.3); }
+  25% { opacity: 1; transform: scale(0.8); }
+  45% { transform: scale(0.7); }
+  65% { transform: scale(1.1); background: radial-gradient(circle at 35% 30%, #fff, #b45cff 55%, #3d0f80); }
+  100% { opacity: 1; transform: scale(1.6); background: radial-gradient(circle at 35% 30%, #fff, var(--rc) 55%, var(--rd)); box-shadow: 0 0 60px var(--rc), 0 0 140px var(--rc); }
+}
+@keyframes sfxChargeBig {
+  0% { opacity: 0; transform: scale(0.3); }
+  20% { opacity: 1; transform: scale(0.8); }
+  35% { transform: scale(0.65); }
+  50% { transform: scale(1.05); }
+  62% { transform: scale(0.9); background: radial-gradient(circle at 35% 30%, #fff, #b45cff 55%, #3d0f80); }
+  100% { opacity: 1; transform: scale(2); background: radial-gradient(circle at 35% 30%, #fff, var(--rc) 55%, var(--rd)); box-shadow: 0 0 80px var(--rc), 0 0 200px var(--rc); }
+}
+@keyframes sfxShake { 25% { transform: translate(-4px, 2px); } 50% { transform: translate(3px, -3px); } 75% { transform: translate(-2px, -2px); } }
+
+.sfx-flash { position: absolute; inset: -20%; pointer-events: none; opacity: 0; background: radial-gradient(circle, #fff 0%, var(--rc) 35%, transparent 70%); }
+.sfx-stage.revealed .sfx-flash { animation: sfxFlash 0.6s ease-out; }
+@keyframes sfxFlash { 0% { opacity: 1; transform: scale(0.4); } 100% { opacity: 0; transform: scale(1.6); } }
+
+.sfx-rays {
+  position: absolute; top: 50%; left: 50%; width: 720px; height: 720px; margin: -360px 0 0 -360px; border-radius: 50%; opacity: 0;
+  background: repeating-conic-gradient(from 0deg, var(--rc) 0deg 9deg, transparent 9deg 24deg);
+  -webkit-mask: radial-gradient(circle, #000 18%, transparent 68%); mask: radial-gradient(circle, #000 18%, transparent 68%);
+}
+.sfx-stage.revealed .sfx-rays { opacity: 0.45; animation: sfxSpin 9s linear infinite, fade 0.4s; }
+.sfx-stage.r-legendary .sfx-rays { opacity: 0.75; }
+@keyframes sfxSpin { to { transform: rotate(360deg); } }
+
+.sfx-hero { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; }
+.sfx-stage.revealed .sfx-hero { animation: sfxPop 0.55s cubic-bezier(0.2, 1.6, 0.4, 1); }
+@keyframes sfxPop { 0% { transform: scale(0.2) translateY(40px); opacity: 0; } 100% { transform: none; opacity: 1; } }
+.sfx-art {
+  width: min(250px, 58vw, 42vh); aspect-ratio: 1; border-radius: 22px; border: 5px solid var(--rc);
+  background: radial-gradient(circle at 50% 35%, #fff 0%, var(--rc) 70%, var(--rd) 100%);
+  box-shadow: 0 0 0 4px rgba(0,0,0,0.35), 0 0 40px var(--rc);
+}
+.sfx-art img { width: 100%; height: 100%; display: block; }
+.sfx-rar { margin-top: 4px; background: var(--rd); border: 2px solid #fff; border-radius: 999px; padding: 2px 16px; font-weight: 800; font-size: 15px; }
+.sfx-name { margin: 0; font-size: clamp(24px, 6vw, 34px); text-shadow: 0 3px 0 rgba(0,0,0,0.6); }
+.sfx-info { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.sfx-info span { background: rgba(255,255,255,0.14); border: 1.5px solid rgba(255,255,255,0.35); border-radius: 999px; padding: 3px 12px; font-weight: 700; font-size: 14px; }
+.sfx-legend {
+  font-family: 'Rubik', sans-serif; font-weight: 800; font-size: 40px; color: #ffe07a;
+  -webkit-text-stroke: 2px #a86300; text-shadow: 0 0 24px #ffb320; animation: sfxLegend 0.9s ease-in-out infinite alternate;
+}
+@keyframes sfxLegend { to { transform: scale(1.08) rotate(-2deg); } }
+.sfx-stage.r-legendary .sfx-art { animation: sfxGlow 1.2s ease-in-out infinite alternate; }
+@keyframes sfxGlow { to { box-shadow: 0 0 0 4px rgba(0,0,0,0.35), 0 0 80px var(--rc), 0 0 140px rgba(255, 224, 122, 0.7); } }
+
+/* progress strip for a 10x summon */
+.sfx-strip { position: relative; z-index: 3; display: grid; grid-template-columns: repeat(10, 1fr); gap: 5px; width: 100%; max-width: 560px; }
+.sfx-strip i { aspect-ratio: 1; border-radius: 9px; border: 2px dashed rgba(255,255,255,0.3); background: rgba(255,255,255,0.06); overflow: hidden; }
+.sfx-strip i.got { border: 2.5px solid var(--rc); background: radial-gradient(circle at 50% 35%, #fff, var(--rc)); animation: pop 0.3s; }
+.sfx-strip img { width: 100%; height: 100%; display: block; }
+
+/* summary after a 10x summon */
+.summon-fx.done { cursor: default; }
+.summon-fx.done .sfx-stage { align-items: stretch; overflow-y: auto; }
+.summon-fx.done .sfx-hero { width: 100%; padding: 6px 0 10px; }
+.sfx-sum-tags { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.sfx-sum-tags span { border: 2px solid var(--rc); color: var(--rc); background: rgba(0,0,0,0.3); border-radius: 999px; padding: 2px 12px; font-weight: 800; }
+.sfx-grid { width: 100%; max-width: 720px; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 8px 0; text-align: start; }
+.sfx-grid .card { cursor: default; }
+.sfx-grid .card:hover { transform: none; }
+.sfx-done { min-width: 180px; }
+body.mode-mobile .sfx-grid { grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 6px; }
+body.mode-mobile .sfx-grid .card-name { font-size: 11px; }
+@media (orientation: landscape) and (max-height: 560px) {
+  .sfx-art { width: min(160px, 40vh); }
+  .sfx-strip { max-width: 420px; }
+  .sfx-legend { font-size: 30px; }
+  .sfx-name { font-size: 22px; }
+  body .summon-fx .sfx-torii { transform: translate(-50%, -88%) scale(0.85); }
+}
