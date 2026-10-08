@@ -1,5 +1,6 @@
 // Ninja generator: every ninja is unique – own name, look, base stats and trait.
 import { RARITIES, TRAIT_POOLS } from './rarity.js';
+import { costumeLook, ORDINARY_STYLES } from './ninja-looks.js';
 
 const NAMES = [
   'קנג׳י', 'הירו', 'יוקי', 'סאקורה', 'ריו', 'טאקשי', 'אקירה', 'מיקו', 'קאיטו', 'האנה',
@@ -53,7 +54,9 @@ export function rollLook(rarity, rng = Math.random) {
     look.eyeColor = EYE_GLOW[look.aura];
     if (rng() < 0.4) { look.hair = 'wild'; look.hairColor = pick(rng, ['#f2f2f2', '#ffb320', '#d63c3c']); }
   }
-  return look;
+  // Keep the original RNG draw sequence so deterministic enemy stats do not change.
+  const styleSeed = [...JSON.stringify(look)].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7);
+  return costumeLook(ord >= 3 ? 'shadow' : ORDINARY_STYLES[styleSeed % ORDINARY_STYLES.length], look.skin);
 }
 
 /** A brand-new ninja of the given rarity (used by summons, starting roster and enemies). */

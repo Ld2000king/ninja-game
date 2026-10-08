@@ -1,5 +1,6 @@
 // Procedural chibi-ninja renderer. Everything is drawn with Canvas 2D – no image assets.
 // Origin = point between the feet. Character faces +x; flip with pose.facing = -1.
+import { drawNinja } from './ninja.js';
 
 const OUT = '#2b1b12';
 const TAU = Math.PI * 2;
@@ -20,6 +21,7 @@ const AURAS = {
  */
 export function drawCharacter(ctx, look, p = {}) {
   if (look.custom === 'turtle' || p.custom === 'turtle') return drawTurtle(ctx, p);
+  if (look.ninjaStyle) return drawNinja(ctx, look, p, drawWeapon, drawAura);
   const t = p.t || 0;
   const s = (look.scale || 1) * (p.scale || 1);
   ctx.save();

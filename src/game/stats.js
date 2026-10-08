@@ -3,6 +3,7 @@ import { BELTS, TRAITS } from '../data/rarity.js';
 import { WEAPON_MAP, WEAPON_TYPES } from '../data/weapons.js';
 import { MONSTERS } from '../data/monsters.js';
 import { rollNinja, seededRng } from '../data/ninjas.js';
+import { ninjaLook } from '../data/ninja-looks.js';
 
 export function ninjaStats(n, weapon) {
   const belt = BELTS[n.belt];
@@ -29,7 +30,7 @@ export function ninjaSpec(n, weapon) {
     rarity: n.rarity,
     stats: ninjaStats(n, weapon),
     ability: WEAPON_TYPES[type].ability,
-    look: { ...n.look, belt: BELTS[n.belt].color, weapon: type, weaponTint: weapon?.tint },
+    look: { ...ninjaLook(n), belt: BELTS[n.belt].color, weapon: type, weaponTint: weapon?.tint },
   };
 }
 
