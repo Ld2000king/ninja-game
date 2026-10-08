@@ -2,6 +2,10 @@
 // a side islet with the balloon to the battle map, and "coming soon" building plots for future features.
 import { drawCharacter, drawWeapon, roundRect } from './character.js';
 import { costumeLook } from '../data/ninja-looks.js';
+import { DAYLIGHT_LAYOUT, scenePoint, contains } from './village-layout.js';
+
+// Vite emits a hashed asset; the existing PWA worker caches it for offline visits.
+const villageURL = new URL('../assets/daylight-village.webp', import.meta.url).href;
 
 const W = 1000, H = 560;
 const TAU = Math.PI * 2;
@@ -47,11 +51,18 @@ export class TownScene {
     this.townName = townName;
     this.hover = null;
     this.t = 0;
+    this.signTargets = [];
+    this.artReady = false;
+    this.art = new Image();
+    this.art.onload = () => { if (!this.destroyed) this.artReady = true; };
+    // Keep the procedural town available if loading the artwork fails.
+    this.art.onerror = () => { this.artReady = false; };
+    this.art.src = villageURL;
     this.sky = this.makeSky();
     this.island = this.makeIsland();
     // ninjas stroll around the central plaza
     this.walkers = looks.slice(0, 6).map((look, i) => ({
-      look, x: 360 + i * 38, y: 318 + (i % 3) * 18, dir: i % 2 ? 1 : -1,
+      look, x: 360 + i * 28, y: 274 + (i % 3) * 10, dir: i % 2 ? 1 : -1,
       speed: 14 + (i * 7) % 12, pause: Math.random() * 2, t: Math.random() * 10,
     }));
     this.resize = this.resize.bind(this);
@@ -61,13 +72,12 @@ export class TownScene {
     this.ro?.observe(canvas);
     this.resize();
     const toWorld = (e) => {
-      const r = canvas.getBoundingClientRect();
-      const k = Math.min(r.width / W, r.height / H);
-      return [(e.clientX - r.left - (r.width - W * k) / 2) / k, (e.clientY - r.top - (r.height - H * k) / 2) / k];
+      return scenePoint(canvas.getBoundingClientRect(), e.clientX, e.clientY);
     };
     this.onMove = (e) => {
       const [x, y] = toWorld(e);
-      const b = [...BUILDINGS].reverse().find(b => x >= b.box[0] && x <= b.box[0] + b.box[2] && y >= b.box[1] && y <= b.box[1] + b.box[3]);
+      const signTarget = this.signTargets.find(s => contains(s.box, x, y));
+      const b = signTarget || [...BUILDINGS].reverse().find(b => contains(this.artReady ? DAYLIGHT_LAYOUT[b.id].box : b.box, x, this.artReady ? y : y - Math.sin(this.t * 0.9) * 3));
       this.hover = b?.id || null;
       canvas.style.cursor = this.hover ? 'pointer' : 'default';
     };
@@ -90,6 +100,7 @@ export class TownScene {
 
   destroy() {
     this.destroyed = true;
+    this.art.onload = this.art.onerror = null;
     cancelAnimationFrame(this.raf);
     window.removeEventListener('resize', this.resize);
     this.ro?.disconnect();
@@ -106,6 +117,7 @@ export class TownScene {
     // on a small screen the signs are drawn larger so they stay readable
     const shown = Math.min(r.width, r.height * W / H); // on-screen width of the scene
     this.signScale = shown < 700 ? Math.min(1.4, 600 / Math.max(1, shown)) : 1;
+    this.artSignScale = shown < 700 ? Math.min(2, 760 / Math.max(1, shown)) : 1;
   }
 
   update(dt) {
@@ -114,7 +126,7 @@ export class TownScene {
       w.t += dt;
       if (w.pause > 0) { w.pause -= dt; continue; }
       w.x += w.dir * w.speed * dt;
-      if (w.x < 345 || w.x > 560) { w.dir *= -1; w.pause = 1 + Math.random() * 2; }
+      if (w.x < 345 || w.x > 520) { w.dir *= -1; w.pause = 1 + Math.random() * 2; }
       if (Math.random() < dt * 0.15) w.pause = 1 + Math.random() * 2.5;
     }
   }
@@ -130,6 +142,10 @@ export class TownScene {
     const g = ctx.createLinearGradient(0, -oy, 0, H + oy);
     g.addColorStop(0, '#6fbfee'); g.addColorStop(0.6, '#bfe6f8'); g.addColorStop(1, '#eef9fd');
     ctx.fillStyle = g; ctx.fillRect(-ox, -oy, W + ox * 2, H + oy * 2);
+    if (this.artReady) {
+      this.renderDaylight(ctx, t);
+      return;
+    }
     ctx.drawImage(this.sky, 0, 0, W, H);
     // extra clouds in the space above and below the island on tall screens
     for (let i = 0; oy > 20 && i < 8; i++) {
@@ -170,6 +186,42 @@ export class TownScene {
       ctx.direction = 'rtl';
       banner(ctx, 500, 30, this.townName);
     }
+    ctx.direction = 'ltr';
+  }
+
+  renderDaylight(ctx, t) {
+    ctx.drawImage(this.art, 0, 0, W, H);
+    ctx.save();
+    // A soft pulse over the shrine's painted orb keeps the scene alive.
+    const pulse = 0.12 + Math.sin(t * 2.4) * 0.06;
+    const glow = ctx.createRadialGradient(468, 170, 1, 468, 170, 17);
+    glow.addColorStop(0, `rgba(180,250,255,${pulse + 0.2})`);
+    glow.addColorStop(1, 'rgba(80,200,255,0)');
+    ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(468, 170, 17, 0, TAU); ctx.fill();
+
+    [...this.walkers].sort((a, b) => a.y - b.y).forEach(w => this.walker(w));
+    // Petals stay subtle and do not cover the building signs or controls.
+    for (let i = 0; i < 14; i++) {
+      const x = (i * 73 + t * (7 + i % 3)) % 800 + 30;
+      const y = 195 + ((i * 39 + t * (4 + i % 2)) % 250);
+      ctx.fillStyle = i % 2 ? 'rgba(255,225,236,0.8)' : 'rgba(244,163,193,0.7)';
+      ctx.beginPath(); ctx.ellipse(x, y, 2.3, 1.1, Math.sin(t + i), 0, TAU); ctx.fill();
+    }
+    this.signTargets = [];
+    ctx.direction = 'rtl';
+    for (const b of BUILDINGS) {
+      const layout = DAYLIGHT_LAYOUT[b.id], hot = this.hover === b.id;
+      const text = b.soon ? `🚧 ${b.label.split(' ').slice(1).join(' ')}` : b.label;
+      const box = villageSign(ctx, ...layout.sign, text, hot, !!b.soon, this.artSignScale);
+      this.signTargets.push({ id: b.id, box });
+      if (hot) {
+        const [x, y, w, h] = layout.box;
+        ctx.strokeStyle = 'rgba(255,242,189,0.9)'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.ellipse(x + w / 2, y + h - 3, w * 0.4, 7, 0, 0, TAU); ctx.stroke();
+      }
+    }
+    if (this.townName) villageSign(ctx, 570, 28, this.townName, false, false, 1.1);
+    ctx.restore();
     ctx.direction = 'ltr';
   }
 
@@ -259,6 +311,22 @@ export class TownScene {
 }
 
 // ───────────── pieces
+function villageSign(ctx, x, y, text, hot, soon, scale) {
+  ctx.save();
+  ctx.font = `700 ${soon ? 12 : 14}px Rubik, sans-serif`;
+  const w = ctx.measureText(text).width + 22, h = 27;
+  x = Math.max(w * scale / 2 + 3, Math.min(W - w * scale / 2 - 3, x));
+  ctx.translate(x, y); ctx.scale(scale, scale);
+  ctx.shadowColor = 'rgba(25,50,48,0.3)'; ctx.shadowBlur = 5; ctx.shadowOffsetY = 2;
+  ctx.fillStyle = hot ? '#ffedb3' : soon ? '#f0eadb' : '#f9f3e3';
+  ctx.strokeStyle = hot ? '#bd8d40' : '#456b65'; ctx.lineWidth = 1.5;
+  roundRect(ctx, -w / 2, -h / 2, w, h, 7); ctx.fill(); ctx.stroke();
+  ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+  ctx.fillStyle = '#294942'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(text, 0, 1); ctx.restore();
+  return [x - w * scale / 2, y - h * scale / 2, w * scale, h * scale];
+}
+
 function cloud(ctx, x, y, s) {
   ctx.fillStyle = 'rgba(255,255,255,0.85)';
   for (let k = 0; k < 4; k++) { ctx.beginPath(); ctx.ellipse(x + (k - 1.5) * 24 * s, y + (k % 2 ? -6 : 2) * s, 26 * s, 16 * s, 0, 0, TAU); ctx.fill(); }
