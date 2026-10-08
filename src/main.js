@@ -17,17 +17,22 @@ import {
   toggleSquad, autoSquad, equip, beltStatus, promote, releaseNinja, renameNinja, buyWeapon, grantWeapon, sellPrice, sellItem,
   isUnlocked, summon, SUMMON_COST, SUMMON10_COST, MAX_ROSTER,
 } from './game/save.js';
+import { MODES, getModePref, setModePref, detectMode, activeMode, applyMode } from './game/device.js';
+import { registerServiceWorker, canInstall, promptInstall, onInstallChange, isStandalone, isIOS } from './pwa.js';
+
+applyMode();
+registerServiceWorker();
 
 const app = document.getElementById('app');
 app.innerHTML = `
   <header class="topbar">
     <div class="logo">NINJA <span>WARS</span></div>
     <nav class="nav">
-      <button data-nav="town">🏘️ העיר</button>
-      <button data-nav="dojo">🥋 דוג׳ו</button>
-      <button data-nav="shop">🏪 חנות</button>
-      <button data-nav="summon">⛩️ זימון</button>
-      <button data-nav="map">🎈 מפת קרבות</button>
+      <button data-nav="town"><i>🏘️</i><span>העיר</span></button>
+      <button data-nav="dojo"><i>🥋</i><span>דוג׳ו</span></button>
+      <button data-nav="shop"><i>🏪</i><span>חנות</span></button>
+      <button data-nav="summon"><i>⛩️</i><span>זימון</span></button>
+      <button data-nav="map"><i>🎈</i><span>מפת קרבות</span></button>
     </nav>
     <div class="stats">
       <div class="lvl"><b id="st-level"></b><div class="xpbar"><i id="st-xp"></i></div></div>
@@ -74,7 +79,7 @@ function toast(msg) {
 function openModal(html, cls = '') {
   modalRoot.innerHTML = `<div class="modal-backdrop"><div class="modal ${cls}">${html}</div></div>`;
   const bd = modalRoot.firstElementChild;
-  const sticky = cls.includes('result-modal');
+  const sticky = cls.includes('result-modal') || cls.includes('sticky');
   bd.addEventListener('click', (e) => { if ((e.target === bd && !sticky) || e.target.closest('[data-close]')) closeModal(); });
   return bd.firstElementChild;
 }
@@ -123,6 +128,7 @@ function weaponCard(w, actions = '', extra = '') {
 function go(name, arg) {
   if (battle) { battle.destroy(); battle = null; }
   if (town) { town.destroy(); town = null; }
+  if (current === 'battle' && name !== 'battle') try { screen.orientation?.unlock?.(); } catch { /* unsupported */ }
   current = name;
   document.body.classList.toggle('in-battle', name === 'battle');
   closeModal();
@@ -141,8 +147,12 @@ document.getElementById('settings-btn').addEventListener('click', () => {
   const m = openModal(`
     <button class="close" data-close>✕</button>
     <h2>הגדרות</h2>
-    <p class="muted">ההתקדמות נשמרת אוטומטית בדפדפן במחשב שלך.</p>
+    <p class="muted">ההתקדמות נשמרת אוטומטית בדפדפן במכשיר שלך.</p>
     <div class="col">
+      <div class="col tiny-gap">מצב משחק
+        ${modeButtons()}
+      </div>
+      ${installBlock()}
       <label class="col tiny-gap">שם העיר שלך
         <div class="row gap"><input id="town-name" value="${save.town}" maxlength="22"><button class="btn small" id="save-name">שמור</button></div>
       </label>
@@ -151,6 +161,8 @@ document.getElementById('settings-btn').addEventListener('click', () => {
       <button class="btn" id="dev-xp">🧪 מצב בדיקה: +500 ניסיון לכל הנינג׳ות</button>
       <button class="btn danger" id="reset">🗑️ איפוס כל ההתקדמות</button>
     </div>`, 'small');
+  bindModeButtons(m, () => { afterModeChange(); toast(`מצב ${MODES[getModePref()].name} הופעל`); });
+  bindInstall(m);
   m.querySelector('#save-name').onclick = () => { save.town = m.querySelector('#town-name').value.trim() || save.town; persist(); toast('השם נשמר'); if (current === 'town') rerender(); };
   m.querySelector('#dev-gold').onclick = () => { save.gold += 10000; persist(); refreshStats(); toast('+10,000 זהב'); };
   m.querySelector('#dev-weapons').onclick = () => { WEAPONS.forEach(w => grantWeapon(w.id)); persist(); toast('נוספו כל הנשקים למחסן'); };
@@ -159,6 +171,66 @@ document.getElementById('settings-btn').addEventListener('click', () => {
     if (confirm('בטוח? כל ההתקדמות תימחק.')) { resetSave(); go('town'); toast('ההתקדמות אופסה'); }
   };
 });
+
+// ───────────────────────── PLAY MODE & INSTALL
+function modeButtons() {
+  const pref = getModePref() || 'auto';
+  return `<div class="mode-pick">${Object.entries(MODES).map(([id, m]) => `
+    <button class="mode-opt ${id === pref ? 'on' : ''}" data-mode="${id}">
+      <i>${m.icon}</i><b>${m.name}</b><small>${id === 'auto' ? `${m.desc} (כרגע: ${MODES[detectMode()].name})` : m.desc}</small>
+    </button>`).join('')}</div>`;
+}
+function bindModeButtons(root, after) {
+  root.querySelector('.mode-pick').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-mode]');
+    if (!b) return;
+    setModePref(b.dataset.mode);
+    after?.();
+  });
+}
+
+// A running battle keeps going; its canvases just re-measure for the new layout.
+function afterModeChange() {
+  closeModal();
+  if (current === 'battle') window.dispatchEvent(new Event('resize'));
+  else rerender();
+}
+
+function installBlock() {
+  if (isStandalone()) return '<p class="muted tiny">✅ המשחק מותקן כאפליקציה.</p>';
+  if (canInstall()) return '<button class="btn primary" id="install-app">📲 התקן כאפליקציה</button>';
+  if (isIOS()) return '<p class="install-tip">📲 להתקנה כאפליקציה: לחץ על <b>שיתוף</b> <span dir="ltr">⬆️</span> ואז <b>״הוסף למסך הבית״</b>.</p>';
+  return '';
+}
+function bindInstall(root) {
+  root.querySelector('#install-app')?.addEventListener('click', async () => {
+    if (await promptInstall()) toast('🎉 המשחק הותקן!');
+  });
+}
+
+function openModeChooser() {
+  const m = openModal(`
+    <div class="mode-chooser">
+      <div class="logo big">NINJA <span>WARS</span></div>
+      <h2>איך תרצה לשחק?</h2>
+      <p class="muted">אפשר לשנות את זה בכל רגע בהגדרות ⚙️</p>
+      ${modeButtons()}
+      ${installBlock()}
+    </div>`, 'small sticky');
+  bindModeButtons(m, afterModeChange);
+  bindInstall(m);
+}
+
+// Show the install button in the top bar once the browser says the game can be installed.
+const installBtn = document.createElement('button');
+installBtn.className = 'icon-btn install-btn';
+installBtn.title = 'התקן כאפליקציה';
+installBtn.textContent = '📲';
+installBtn.onclick = async () => { if (await promptInstall()) toast('🎉 המשחק הותקן!'); };
+document.querySelector('.stats').prepend(installBtn);
+const syncInstall = () => { installBtn.hidden = !canInstall(); };
+onInstallChange(syncInstall);
+syncInstall();
 
 // ───────────────────────── TOWN
 function renderTown() {
@@ -610,9 +682,11 @@ function renderBattle(stageId) {
           <button class="btn small danger" id="retreat">🏳️ נסיגה</button>
         </div>
       </div>
+      <p class="rotate-hint">📱↻ סובב את הטלפון לרוחב כדי לראות את הקרב גדול יותר</p>
       <p class="hint">הנינג׳ות קופצות לענן הקרב בכל סיבוב. לחץ על כישוף ואז על שדה הקרב (או על הענן) כדי להטיל אותו.</p>
     </div>`;
 
+  if (activeMode() === 'mobile') screen.orientation?.lock?.('landscape').catch(() => { /* only works in fullscreen / installed app */ });
   const fighters = squadNinjas();
   const spellBtns = [...screenEl.querySelectorAll('[data-spell]')];
   battle = new Battle(document.getElementById('battle-canvas'), {
@@ -702,3 +776,4 @@ function showResult(stage, res, fighters) {
 }
 
 go('town');
+if (!getModePref()) openModeChooser();
